@@ -12,7 +12,7 @@ This is mostly the adapter seam (canned responses), plus engine tests for error 
 
 **Blocked by:** 01 (Tracer bullet)
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [x] One shared HTTP helper retries with backoff on 429 and 5xx, for both the feed fetch and Todoist.
 - [x] Todoist's `retry_after` is honoured when present.
@@ -22,3 +22,7 @@ This is mostly the adapter seam (canned responses), plus engine tests for error 
 - [x] A feed that is malformed, or parses to something unexpected, fails the run clearly instead of marking every Assignment Missing from Canvas.
 - [x] The process exits non-zero only when the whole run failed: feed unreachable after retries, Todoist rejecting the token, or an unparseable feed.
 - [x] Tests, written first, cover each criterion: adapter tests with canned responses; engine tests with fakes for the plan-limit and isolation behaviour.
+
+## Comments
+
+2026-10-05: Checked on GitHub Actions against the real feed and Todoist (run 37294076484): `created 0, updated 0, skipped 8, errors 0`, exit 0. The free-plan limit's exact Todoist `error_tag` is undocumented; any tag containing `LIMIT_REACHED` is treated as a plan limit. Confirm the warning the first time a limit is really hit.

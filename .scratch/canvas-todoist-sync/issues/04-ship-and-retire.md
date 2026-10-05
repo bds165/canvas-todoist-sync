@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 (Sync rules), 03 (Resilient HTTP and error handling)
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [x] After the Sync End Date the sync is Retired: no feed or Todoist calls, a "sync retired" log line, and exit 0 (engine test, written first).
 - [x] The workflow:
@@ -36,3 +36,5 @@ Dry run: created 0, updated 0, skipped 8, errors 0
 ```
 
 Exit code 0; `state.json` unchanged. The 8 skipped are feed Assignments outside the Sync Window.
+
+2026-10-05: First workflow run (37290924317) failed with `Calendar Feed fetch failed: InvalidURL`: the pasted repo secret wasn't the bare address. Resetting both secrets with `gh secret set -f .env` fixed it. Run 37294076484 on Python 3.12 succeeded: `created 0, updated 0, skipped 8, errors 0`, `state.json` unchanged. Afterwards bumped `actions/checkout` and `actions/setup-python` to v7 (Node 24).

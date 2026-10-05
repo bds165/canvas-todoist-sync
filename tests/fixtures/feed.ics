@@ -1,0 +1,35 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Example//Made-up Canvas feed//EN
+X-WR-CALNAME:Made-up Student Calendar
+BEGIN:VEVENT
+DTEND:20261010T105900Z
+DTSTAMP:20261005T000000Z
+DTSTART:20261010T105900Z
+SUMMARY:Essay 1: Algorithms\, data and you [COMPSCI 101]
+UID:event-assignment-1001
+URL;VALUE=URI:https://canvas.example.edu/calendar?include_contexts=course_7
+ 7&month=10&year=2026#assignment_1001
+DESCRIPTION:A long description that the feed folds across several lines so 
+ that no line is longer than seventy-five octets\, with escaped commas\; and
+  semicolons.
+END:VEVENT
+BEGIN:VEVENT
+DTEND;VALUE=DATE;VALUE=DATE:20261012
+DTSTAMP:20261005T000000Z
+DTSTART;VALUE=DATE;VALUE=DATE:20261012
+SUMMARY:Quiz 2 [MATHS 108]
+UID:event-assignment-2002
+URL;VALUE=URI:https://canvas.example.edu/calendar?include_contexts=course_8
+ 8&month=10&year=2026#assignment_2002
+END:VEVENT
+BEGIN:VEVENT
+DTEND:20261008T010000Z
+DTSTAMP:20261005T000000Z
+DTSTART:20261007T230000Z
+SUMMARY:Lecture 12 [COMPSCI 101]
+UID:event-calendar-event-555
+URL;VALUE=URI:https://canvas.example.edu/calendar?include_contexts=course_7
+ 7&month=10&year=2026#calendar_event_555
+END:VEVENT
+END:VCALENDAR

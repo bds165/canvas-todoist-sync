@@ -13,22 +13,22 @@ Read Canvas only through the Calendar Feed (ADR 0002). Use plain `requests`, `ic
 
 **Status:** ready-for-agent
 
-- [ ] Config loads from YAML with the spec's defaults (`School`, Lookahead 31, Lookback 5, Sync End Date 2027-08-01, dry run off). The secrets `CANVAS_CALENDAR_FEED_URL` and `TODOIST_TOKEN` come from environment variables, or from a local `.env` during development.
-- [ ] The Calendar Feed adapter (tested with made-up fixtures, never the real feed):
+- [x] Config loads from YAML with the spec's defaults (`School`, Lookahead 31, Lookback 5, Sync End Date 2027-08-01, dry run off). The secrets `CANVAS_CALENDAR_FEED_URL` and `TODOIST_TOKEN` come from environment variables, or from a local `.env` during development.
+- [x] The Calendar Feed adapter (tested with made-up fixtures, never the real feed):
   - keeps only `event-assignment-<id>` events
   - takes the course ID from the event link's `include_contexts=course_<id>` and the course code from the trailing `[CODE]` tag in the title
   - strips that tag from the title
   - builds the link `<host>/courses/<course id>/assignments/<assignment id>`
   - parses timed events as UTC and `VALUE=DATE` events as date-only, including the duplicated `VALUE=DATE` parameter
   - handles folded and escaped lines
-- [ ] A new Synced Task is created only for an Assignment whose course passes `course_allowlist` (when non-empty) and whose Canvas Due Date is inside the Sync Window (Lookback through Lookahead). Date-only due dates are compared as whole days.
-- [ ] The School Project is found by name or created. A Course Section is found or created by override name, falling back to the course code.
-- [ ] Task title is the Assignment title without the course tag. The description contains the Assignment link. No labels are added.
-- [ ] A timed due date is sent as a fixed UTC datetime, and a date-only due date as a plain date (adapter test asserts both payloads).
-- [ ] `state.json` records, per course, the section ID and, per Assignment, the task ID, the last-synced Canvas Due Date (timed or date-only, exactly as the feed gave it) and the status `open`. It contains no secrets and no feed address.
-- [ ] Dry run makes zero Todoist writes and logs what would be created.
-- [ ] The run ends with the summary line `created N, updated N, skipped N, errors N`.
-- [ ] Engine tests (written first, through the fakes) cover:
+- [x] A new Synced Task is created only for an Assignment whose course passes `course_allowlist` (when non-empty) and whose Canvas Due Date is inside the Sync Window (Lookback through Lookahead). Date-only due dates are compared as whole days.
+- [x] The School Project is found by name or created. A Course Section is found or created by override name, falling back to the course code.
+- [x] Task title is the Assignment title without the course tag. The description contains the Assignment link. No labels are added.
+- [x] A timed due date is sent as a fixed UTC datetime, and a date-only due date as a plain date (adapter test asserts both payloads).
+- [x] `state.json` records, per course, the section ID and, per Assignment, the task ID, the last-synced Canvas Due Date (timed or date-only, exactly as the feed gave it) and the status `open`. It contains no secrets and no feed address.
+- [x] Dry run makes zero Todoist writes and logs what would be created.
+- [x] The run ends with the summary line `created N, updated N, skipped N, errors N`.
+- [x] Engine tests (written first, through the fakes) cover:
   - new Assignment → task
   - timed and date-only due dates
   - inside the Lookback → task

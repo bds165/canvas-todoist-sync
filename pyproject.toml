@@ -1,0 +1,13 @@
+[project]
+name = "canvas-todoist"
+version = "0.1.0"
+description = "One-way sync from the Canvas Calendar Feed into Todoist"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["canvas_todoist"]

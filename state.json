@@ -1,0 +1,78 @@
+{
+  "assignments": {
+    "509056": {
+      "canvas_due": "2026-10-19T04:00:00Z",
+      "status": "open",
+      "task_id": "6hh2m9VWVmhHhJwp"
+    },
+    "509058": {
+      "canvas_due": "2026-10-05T04:00:00Z",
+      "status": "open",
+      "task_id": "6hh2m8q86GrwFGMp"
+    },
+    "509063": {
+      "canvas_due": "2026-10-02T04:00:00Z",
+      "status": "open",
+      "task_id": "6hh2m8VX7JR8cP5p"
+    },
+    "509064": {
+      "canvas_due": "2026-10-16T04:00:00Z",
+      "status": "open",
+      "task_id": "6hh2m9PgW4PJjcFp"
+    },
+    "509066": {
+      "canvas_due": "2026-10-05T04:00:00Z",
+      "status": "open",
+      "task_id": "6hh2m8j56vjJ2JVp"
+    },
+    "509068": {
+      "canvas_due": "2026-10-23T04:00:00Z",
+      "status": "open",
+      "task_id": "6hh2m9VqJ8Mvfjfp"
+    },
+    "509212": {
+      "canvas_due": "2026-10-12",
+      "status": "open",
+      "task_id": "6hh2m9FRPWGwcvXp"
+    },
+    "512217": {
+      "canvas_due": "2026-10-09",
+      "status": "open",
+      "task_id": "6hh2m98VW9PjXHqG"
+    },
+    "512221": {
+      "canvas_due": "2026-10-15",
+      "status": "open",
+      "task_id": "6hh2m9H45Q2pWJrp"
+    },
+    "518706": {
+      "canvas_due": "2026-10-09",
+      "status": "open",
+      "task_id": "6hh2m93vj4vxRh6G"
+    },
+    "519449": {
+      "canvas_due": "2026-10-02",
+      "status": "open",
+      "task_id": "6hh2m8cCjmMVV9qp"
+    },
+    "525023": {
+      "canvas_due": "2026-10-05",
+      "status": "open",
+      "task_id": "6hh2m9265vQ95pXp"
+    }
+  },
+  "courses": {
+    "142231": {
+      "section_id": "6hh2m8qxGWM6m8Qp"
+    },
+    "142353": {
+      "section_id": "6hh2m8MwHp9WCr2p"
+    },
+    "142874": {
+      "section_id": "6hh2m98c7Ww2mm9G"
+    },
+    "143400": {
+      "section_id": "6hh2m8XRmq84MM4p"
+    }
+  }
+}

@@ -11,7 +11,7 @@ Read Canvas only through the Calendar Feed (ADR 0002). Use plain `requests`, `ic
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [x] Config loads from YAML with the spec's defaults (`School`, Lookahead 31, Lookback 5, Sync End Date 2027-08-01, dry run off). The secrets `CANVAS_CALENDAR_FEED_URL` and `TODOIST_TOKEN` come from environment variables, or from a local `.env` during development.
 - [x] The Calendar Feed adapter (tested with made-up fixtures, never the real feed):
@@ -35,3 +35,14 @@ Read Canvas only through the Calendar Feed (ADR 0002). Use plain `requests`, `ic
   - outside the Sync Window → no task
   - allowlist respected
   - dry run writes nothing
+
+## Comments
+
+2026-10-05: Implemented in 2119a32, with Auckland time for date-only days in 908a049.
+
+- Local `--dry-run` against the real feed: `created 12, updated 0, skipped 8, errors 0`.
+- First real run: `created 12, updated 0, skipped 8, errors 0`, exit 0.
+  - Created the School Project and the COMPSCI 335, BUSINESS 350, FINANCE 384 and GEOG 327 Course Sections.
+  - Created 12 Synced Tasks.
+- Second real run: `created 0, updated 0, skipped 8, errors 0`.
+- `state.json` committed with 12 `open` entries. It holds no secrets.

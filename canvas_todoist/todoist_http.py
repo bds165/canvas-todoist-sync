@@ -2,18 +2,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+import time
+from collections.abc import Callable, Iterator
 from datetime import datetime
 from typing import Any, Protocol
 
+from canvas_todoist.http import HttpError, send_with_retry
 from canvas_todoist.models import CanvasDueDate, format_utc
-from canvas_todoist.todoist import TodoistTask
+from canvas_todoist.todoist import PlanLimitReached, TodoistError, TodoistRejectedToken, TodoistTask
 
 API = "https://api.todoist.com/api/v1"
-
-
-class TodoistError(Exception):
-    """Todoist rejected or failed a request."""
 
 
 class HttpSession(Protocol):
@@ -30,21 +28,22 @@ class HttpSession(Protocol):
 
 
 class TodoistHttpGateway:
-    def __init__(self, token: str, session: HttpSession) -> None:
+    def __init__(self, token: str, session: HttpSession, *, sleep: Callable[[float], None] = time.sleep) -> None:
         self._headers = {"Authorization": f"Bearer {token}"}
         self._session = session
+        self._sleep = sleep
 
     def find_project(self, name: str) -> str | None:
         return next((str(p["id"]) for p in self._list("/projects") if p["name"] == name), None)
 
     def create_project(self, name: str) -> str:
-        return str(self._call("POST", "/projects", json={"name": name})["id"])
+        return str(self._create("/projects", {"name": name})["id"])
 
     def list_sections(self, project_id: str) -> dict[str, str]:
         return {str(s["id"]): s["name"] for s in self._list("/sections", {"project_id": project_id})}
 
     def create_section(self, project_id: str, name: str) -> str:
-        return str(self._call("POST", "/sections", json={"name": name, "project_id": project_id})["id"])
+        return str(self._create("/sections", {"name": name, "project_id": project_id})["id"])
 
     def create_task(
         self,
@@ -62,7 +61,7 @@ class TodoistHttpGateway:
             "section_id": section_id,
         }
         payload.update(_due_fields(due))
-        return str(self._call("POST", "/tasks", json=payload)["id"])
+        return str(self._create("/tasks", payload)["id"])
 
     def list_active_tasks(self) -> list[TodoistTask]:
         return [_task(t) for t in self._list("/tasks")]
@@ -86,6 +85,10 @@ class TodoistHttpGateway:
                 return
             params["cursor"] = page["next_cursor"]
 
+    def _create(self, path: str, payload: dict[str, Any]) -> Any:
+        """Todoist has no deduplication for creates, so they aren't retried where a retry could duplicate."""
+        return self._call("POST", path, json=payload, repeatable=False)
+
     def _call(
         self,
         method: str,
@@ -93,16 +96,38 @@ class TodoistHttpGateway:
         *,
         params: dict[str, str] | None = None,
         json: dict[str, Any] | None = None,
+        repeatable: bool = True,
     ) -> Any:
+        what = f"Todoist {method} {path}"
         try:
-            response = self._session.request(
-                method, API + path, headers=self._headers, params=params, json=json, timeout=30
+            response = send_with_retry(
+                lambda: self._session.request(
+                    method, API + path, headers=self._headers, params=params, json=json, timeout=30
+                ),
+                what,
+                repeatable=repeatable,
+                sleep=self._sleep,
             )
-        except Exception as exc:
-            raise TodoistError(f"Todoist {method} {path} failed: {type(exc).__name__}") from None
-        if not 200 <= response.status_code < 300:
-            raise TodoistError(f"Todoist {method} {path} failed: HTTP {response.status_code}")
-        return response.json()
+        except HttpError as exc:
+            raise TodoistError(str(exc)) from None
+        status = response.status_code
+        if 200 <= status < 300:
+            return response.json()
+        failed = f"{what} failed: HTTP {status}"
+        if status == 401:
+            raise TodoistRejectedToken(failed)
+        error_tag = _error_tag(response)
+        if status != 429 and "LIMIT_REACHED" in error_tag:
+            raise PlanLimitReached(f"{failed}, {error_tag}")
+        raise TodoistError(failed)
+
+
+def _error_tag(response: Any) -> str:
+    """The error_tag of a Todoist error body, e.g. MAX_ITEMS_LIMIT_REACHED; "" if there is none."""
+    try:
+        return str(response.json()["error_tag"])
+    except Exception:
+        return ""
 
 
 def _due_fields(due: CanvasDueDate) -> dict[str, str]:

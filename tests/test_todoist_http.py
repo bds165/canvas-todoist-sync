@@ -1,36 +1,51 @@
+import logging
 from datetime import date, datetime, timezone
 
 import pytest
+import requests
 
-from canvas_todoist.todoist_http import TodoistError, TodoistHttpGateway
+from canvas_todoist.todoist import PlanLimitReached, TodoistError, TodoistRejectedToken
+from canvas_todoist.todoist_http import TodoistHttpGateway
 
 TOKEN = "SECRETtodoistTOKEN"
 API = "https://api.todoist.com/api/v1"
 
 
 class CannedResponse:
-    def __init__(self, status_code: int, body: object = None) -> None:
+    def __init__(self, status_code: int, body: object = None, headers: dict[str, str] | None = None) -> None:
         self.status_code = status_code
         self._body = body
         self.text = "" if body is None else str(body)
+        self.headers = headers or {}
 
     def json(self) -> object:
         return self._body
 
 
 class CannedSession:
-    def __init__(self, *responses: CannedResponse) -> None:
+    """Plays back responses, or raises exceptions, one request at a time."""
+
+    def __init__(self, *responses: CannedResponse | Exception) -> None:
         self.responses = list(responses)
         self.requests: list[dict] = []
+        self.sleeps: list[float] = []
 
     def request(self, method, url, *, headers, params=None, json=None, timeout):
         self.requests.append({"method": method, "url": url, "headers": headers, "params": params, "json": json})
-        return self.responses.pop(0)
+        response = self.responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
 
 
-def gateway(*responses: CannedResponse) -> tuple[TodoistHttpGateway, CannedSession]:
+def gateway(*responses: CannedResponse | Exception) -> tuple[TodoistHttpGateway, CannedSession]:
     session = CannedSession(*responses)
-    return TodoistHttpGateway(TOKEN, session), session
+    return TodoistHttpGateway(TOKEN, session, sleep=session.sleeps.append), session
+
+
+def todoist_error(http_code: int, error_tag: str, **extra: object) -> dict:
+    return {"error": "Something", "error_code": 1, "error_tag": error_tag, "http_code": http_code,
+            "error_extra": extra}
 
 
 def create_task(gw: TodoistHttpGateway, due) -> str:
@@ -94,16 +109,106 @@ def test_sections_are_listed_and_created_in_the_project():
     assert session.requests[1]["json"] == {"name": "MATHS 108", "project_id": "p1"}
 
 
-def test_failed_request_does_not_reveal_token(caplog):
-    caplog.set_level("DEBUG")
-    gw, _ = gateway(CannedResponse(401, "Unauthorized"))
+@pytest.mark.parametrize(
+    "failures",
+    [
+        [CannedResponse(401, f"Unauthorized: Bearer {TOKEN}")],
+        [CannedResponse(500, f"Oops {TOKEN}")] * 4,
+        [requests.ConnectionError(f"Authorization: Bearer {TOKEN}")] * 4,
+    ],
+)
+def test_failed_request_does_not_reveal_token(caplog, failures):
+    caplog.set_level(logging.DEBUG)
+    gw, _ = gateway(*failures)
 
     with pytest.raises(TodoistError) as raised:
         gw.find_project("School")
 
-    assert "401" in str(raised.value)
     assert TOKEN not in str(raised.value)
     assert TOKEN not in caplog.text
+
+
+def test_rejected_token_is_its_own_error():
+    gw, _ = gateway(CannedResponse(401, todoist_error(401, "AUTH_INVALID_TOKEN")))
+
+    with pytest.raises(TodoistRejectedToken, match="401"):
+        gw.list_active_tasks()
+
+
+def test_server_errors_are_retried():
+    gw, session = gateway(CannedResponse(503), CannedResponse(200, {"id": "t1"}))
+
+    gw.update_task("t1", due=date(2026, 10, 12), description="notes")
+
+    assert len(session.requests) == 2
+
+
+@pytest.mark.parametrize(
+    "create",
+    [
+        lambda gw: create_task(gw, date(2026, 10, 12)),
+        lambda gw: gw.create_section("p1", "MATHS 108"),
+        lambda gw: gw.create_project("School"),
+    ],
+    ids=["task", "section", "project"],
+)
+def test_create_is_not_retried_after_a_server_error_so_it_cannot_duplicate(create):
+    gw, session = gateway(CannedResponse(503), CannedResponse(200, {"id": "x1"}))
+
+    with pytest.raises(TodoistError, match="503"):
+        create(gw)
+    assert len(session.requests) == 1
+
+
+def test_create_is_retried_when_rate_limited():
+    gw, session = gateway(
+        CannedResponse(429, todoist_error(429, "TOO_MANY_REQUESTS", retry_after=2)),
+        CannedResponse(200, {"id": "t1"}),
+    )
+
+    assert create_task(gw, date(2026, 10, 12)) == "t1"
+    assert session.sleeps == [2]
+
+
+def test_rate_limit_waits_as_long_as_todoist_asks():
+    gw, session = gateway(
+        CannedResponse(429, todoist_error(429, "TOO_MANY_REQUESTS", retry_after=12)),
+        CannedResponse(200, {"results": [], "next_cursor": None}),
+    )
+
+    assert gw.find_project("School") is None
+    assert session.sleeps == [12]
+
+
+def test_request_still_failing_after_retries_is_an_error():
+    gw, session = gateway(*[CannedResponse(503)] * 4)
+
+    with pytest.raises(TodoistError, match="503"):
+        gw.find_project("School")
+    assert len(session.requests) == 4
+
+
+def test_plan_limit_on_task_create_is_its_own_error():
+    gw, session = gateway(CannedResponse(403, todoist_error(403, "MAX_ITEMS_LIMIT_REACHED")))
+
+    with pytest.raises(PlanLimitReached):
+        create_task(gw, date(2026, 10, 12))
+    assert len(session.requests) == 1
+
+
+def test_plan_limit_on_section_create_is_its_own_error():
+    gw, _ = gateway(CannedResponse(403, todoist_error(403, "MAX_SECTIONS_LIMIT_REACHED")))
+
+    with pytest.raises(PlanLimitReached):
+        gw.create_section("p1", "MATHS 108")
+
+
+def test_other_client_error_is_not_a_plan_limit():
+    gw, _ = gateway(CannedResponse(400, todoist_error(400, "INVALID_ARGUMENT_VALUE")))
+
+    with pytest.raises(TodoistError) as raised:
+        create_task(gw, date(2026, 10, 12))
+    assert not isinstance(raised.value, PlanLimitReached)
 
 
 def test_active_tasks_are_listed_across_all_projects():

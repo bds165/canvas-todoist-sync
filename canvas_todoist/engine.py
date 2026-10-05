@@ -12,7 +12,7 @@ from canvas_todoist.canvas import CanvasSource
 from canvas_todoist.config import Config
 from canvas_todoist.models import Assignment, CanvasDueDate
 from canvas_todoist.state import AssignmentState, CourseState, State, Status
-from canvas_todoist.todoist import TodoistGateway, TodoistTask
+from canvas_todoist.todoist import PlanLimitReached, TodoistGateway, TodoistRejectedToken, TodoistTask
 
 log = logging.getLogger(__name__)
 
@@ -64,18 +64,21 @@ def run_sync(
             run.adopt_by_link(assignments, active)
         _detect_dismissed(new_state, active)
         for assignment in assignments:
-            entry = new_state.assignments.get(assignment.assignment_id)
-            if entry is not None:
-                if entry.status == "missing_from_canvas":
-                    _restore(assignment, entry)
-                if entry.status == "open" and _changed(entry.canvas_due, assignment.due):
-                    run.update_due(assignment, entry, active[entry.task_id])
-                continue
-            allowed = not config.course_allowlist or assignment.course_id in config.course_allowlist
-            if not allowed or not _in_sync_window(assignment, config, now):
-                run.summary.skipped += 1
-                continue
-            run.create(assignment)
+            try:
+                run.sync(assignment, active)
+            except TodoistRejectedToken:
+                raise
+            except PlanLimitReached:
+                run.summary.errors += 1
+                log.warning(
+                    "Todoist free-plan limit reached; %r was not created. Tidy up Todoist or shorten "
+                    "the Lookahead, and the next run will try again",
+                    assignment.title,
+                )
+            except Exception as exc:
+                # Adapters keep secrets out of their messages.
+                run.summary.errors += 1
+                log.error("Could not sync %r: %s: %s", assignment.title, type(exc).__name__, exc)
         _detect_missing(new_state, {a.assignment_id for a in assignments})
     except Exception as exc:
         raise SyncAborted(RunResult(new_state, run.summary)) from exc
@@ -166,6 +169,21 @@ class _SyncRun:
                 continue
             self.state.assignments[assignment.assignment_id] = AssignmentState(adopted.id, assignment.due, status)
             log.info("Rebuilt state: %r is %s", assignment.title, status)
+
+    def sync(self, assignment: Assignment, active: dict[str, TodoistTask]) -> None:
+        """Bring one Assignment's Synced Task up to date, or create it."""
+        entry = self.state.assignments.get(assignment.assignment_id)
+        if entry is not None:
+            if entry.status == "missing_from_canvas":
+                _restore(assignment, entry)
+            if entry.status == "open" and _changed(entry.canvas_due, assignment.due):
+                self.update_due(assignment, entry, active[entry.task_id])
+            return
+        allowed = not self.config.course_allowlist or assignment.course_id in self.config.course_allowlist
+        if not allowed or not _in_sync_window(assignment, self.config, self.now):
+            self.summary.skipped += 1
+            return
+        self.create(assignment)
 
     def section_name(self, assignment: Assignment) -> str:
         return self.config.course_name_overrides.get(assignment.course_id, assignment.course_code)

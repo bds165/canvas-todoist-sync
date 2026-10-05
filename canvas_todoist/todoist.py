@@ -7,6 +7,18 @@ from typing import Protocol
 from canvas_todoist.models import CanvasDueDate
 
 
+class TodoistError(Exception):
+    """Todoist rejected or failed a request."""
+
+
+class PlanLimitReached(TodoistError):
+    """A free-plan limit (sections, active tasks) stopped Todoist creating something."""
+
+
+class TodoistRejectedToken(TodoistError):
+    """Todoist doesn't accept the token, so no request can succeed."""
+
+
 @dataclass(frozen=True)
 class TodoistTask:
     """What the sync reads back about a Todoist task."""
@@ -17,7 +29,11 @@ class TodoistTask:
 
 
 class TodoistGateway(Protocol):
-    """Todoist as the sync sees it. There is no close operation: the sync never closes tasks."""
+    """Todoist as the sync sees it. There is no close operation: the sync never closes tasks.
+
+    Creates raise PlanLimitReached when a free-plan limit is hit; any call raises
+    TodoistRejectedToken when the token is refused.
+    """
 
     def find_project(self, name: str) -> str | None: ...
 

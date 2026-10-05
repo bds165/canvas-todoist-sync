@@ -2,9 +2,11 @@ from datetime import date, datetime, timezone
 
 import pytest
 
+from canvas_todoist.calendar_feed import CalendarFeedError
 from canvas_todoist.config import Config
 from canvas_todoist.engine import SyncAborted, run_sync
 from canvas_todoist.models import Assignment
+from canvas_todoist.todoist import PlanLimitReached, TodoistError, TodoistRejectedToken
 
 from tests.fakes import FakeCanvasSource, FakeTodoist
 
@@ -180,9 +182,9 @@ def test_assignment_already_in_state_is_not_recreated():
     assert str(second.summary) == "created 0, updated 0, skipped 0, errors 0"
 
 
-def test_failed_run_still_reports_tasks_already_created():
+def test_run_aborted_partway_still_reports_tasks_already_created():
     todoist = FakeTodoist()
-    todoist.fail_creates_after = 1
+    todoist.failures["create_task:Quiz 1"] = TodoistRejectedToken("Todoist POST /tasks failed: HTTP 401")
     canvas = FakeCanvasSource([assignment("1001", title="Essay 1"), assignment("1002", title="Quiz 1")])
 
     with pytest.raises(SyncAborted) as raised:
@@ -576,3 +578,110 @@ def test_second_run_without_feed_changes_makes_no_writes_whatever_the_statuses()
     assert todoist.writes == []
     assert second.state == first.state
     assert str(second.summary) == "created 0, updated 0, skipped 1, errors 0"
+
+
+# -- Errors --------------------------------------------------------------------
+
+
+def test_plan_limit_on_task_create_is_a_warning_and_the_run_continues(caplog):
+    todoist = FakeTodoist()
+    todoist.failures["create_task:Essay 1"] = PlanLimitReached("Todoist POST /tasks failed: HTTP 403")
+    canvas = FakeCanvasSource([assignment("1001", title="Essay 1"), assignment("1002", title="Quiz 1")])
+
+    result = run_sync(canvas, todoist, None, Config(), NOW)
+
+    assert todoist.task_titled("Quiz 1")
+    assert set(result.state.assignments) == {"1002"}
+    assert str(result.summary) == "created 1, updated 0, skipped 0, errors 1"
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert any("Essay 1" in m and "plan limit" in m.lower() for m in warnings)
+
+
+def test_plan_limit_on_section_create_is_a_warning_and_the_run_continues(caplog):
+    todoist = FakeTodoist()
+    todoist.failures["create_section:MATHS 108"] = PlanLimitReached("Todoist POST /sections failed: HTTP 403")
+    canvas = FakeCanvasSource([
+        assignment("1001", course_id="88", course_code="MATHS 108", title="Quiz 2"),
+        assignment("1002", title="Essay 1"),
+    ])
+
+    result = run_sync(canvas, todoist, None, Config(), NOW)
+
+    assert todoist.task_titled("Essay 1")
+    assert set(result.state.assignments) == {"1002"}
+    assert "88" not in result.state.courses
+    assert result.summary.errors == 1
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert any("Quiz 2" in m and "plan limit" in m.lower() for m in warnings)
+
+
+def test_assignment_held_back_by_plan_limit_is_created_on_the_next_run():
+    todoist = FakeTodoist()
+    todoist.failures["create_task:Essay 1"] = PlanLimitReached("Todoist POST /tasks failed: HTTP 403")
+    canvas = FakeCanvasSource([assignment()])
+    first = run_sync(canvas, todoist, None, Config(), NOW)
+    todoist.failures.clear()
+
+    second = run_sync(canvas, todoist, first.state, Config(), NOW)
+
+    assert second.state.assignments["1001"].task_id == todoist.task_titled("Essay 1").id
+    assert second.summary.created == 1
+
+
+def test_failure_creating_one_task_is_logged_and_the_rest_are_synced(caplog):
+    todoist = FakeTodoist()
+    todoist.failures["create_task:Quiz 1"] = TodoistError("Todoist POST /tasks failed: HTTP 400")
+    canvas = FakeCanvasSource([
+        assignment("1001", title="Essay 1"),
+        assignment("1002", title="Quiz 1"),
+        assignment("1003", title="Lab 1"),
+    ])
+
+    result = run_sync(canvas, todoist, None, Config(), NOW)
+
+    assert set(result.state.assignments) == {"1001", "1003"}
+    assert str(result.summary) == "created 2, updated 0, skipped 0, errors 1"
+    errors = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
+    assert any("Quiz 1" in m and "HTTP 400" in m for m in errors)
+
+
+def test_failure_updating_one_task_keeps_its_old_state_and_the_rest_are_updated():
+    todoist = FakeTodoist()
+    state = synced(todoist, assignment("1001", title="Essay 1"), assignment("1002", title="Quiz 1"))
+    todoist.failures[f"update_task:{todoist.task_titled('Essay 1').id}"] = TodoistError("HTTP 500")
+    canvas = FakeCanvasSource([
+        assignment("1001", title="Essay 1", due=NEW_DUE),
+        assignment("1002", title="Quiz 1", due=NEW_DUE),
+    ])
+
+    result = run_sync(canvas, todoist, state, Config(), LATER)
+
+    assert result.state.assignments["1001"].canvas_due == datetime(2026, 10, 10, 10, 59, tzinfo=timezone.utc)
+    assert result.state.assignments["1002"].canvas_due == NEW_DUE
+    assert todoist.task_titled("Quiz 1").due == NEW_DUE
+    assert str(result.summary) == "created 0, updated 1, skipped 0, errors 1"
+
+
+@pytest.mark.parametrize(
+    ("feed_error", "todoist_error"),
+    [
+        (CalendarFeedError("Calendar Feed fetch failed: HTTP 503"), None),
+        (CalendarFeedError("Calendar Feed is not a calendar"), None),
+        (None, TodoistRejectedToken("Todoist GET /tasks failed: HTTP 401")),
+        (None, TodoistError("Todoist GET /tasks failed: HTTP 503")),
+    ],
+    ids=["feed unreachable", "feed unparseable", "token rejected", "todoist down"],
+)
+def test_run_that_cannot_read_canvas_or_todoist_fails_and_marks_nothing_missing(feed_error, todoist_error):
+    todoist = FakeTodoist()
+    state = synced(todoist, assignment())
+    canvas = FakeCanvasSource([assignment()])
+    canvas.error = feed_error
+    if todoist_error is not None:
+        todoist.failures["*"] = todoist_error
+
+    with pytest.raises(SyncAborted) as raised:
+        run_sync(canvas, todoist, state, Config(), LATER)
+
+    assert raised.value.result.state == state
+    assert todoist.writes == []

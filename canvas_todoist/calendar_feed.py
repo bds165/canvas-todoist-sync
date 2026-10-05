@@ -7,12 +7,15 @@ from __future__ import annotations
 
 import logging
 import re
+import time
+from collections.abc import Callable, Mapping
 from datetime import date, datetime, timezone
-from typing import Protocol
+from typing import Any, Protocol
 from urllib.parse import parse_qs, urlsplit
 
 import icalendar
 
+from canvas_todoist.http import HttpError, send_with_retry
 from canvas_todoist.models import Assignment, CanvasDueDate
 
 log = logging.getLogger(__name__)
@@ -33,38 +36,60 @@ class _Response(Protocol):
     @property
     def content(self) -> bytes: ...
 
+    @property
+    def headers(self) -> Mapping[str, str]: ...
+
+    def json(self) -> Any: ...
+
 
 class HttpSession(Protocol):
     def get(self, url: str, /, *, timeout: float) -> _Response: ...
 
 
 class CalendarFeedSource:
-    def __init__(self, feed_url: str, session: HttpSession) -> None:
+    def __init__(
+        self, feed_url: str, session: HttpSession, *, sleep: Callable[[float], None] = time.sleep
+    ) -> None:
         self._feed_url = feed_url
         self._session = session
+        self._sleep = sleep
 
     def list_assignments(self) -> list[Assignment]:
         return parse_feed(self._fetch())
 
     def _fetch(self) -> bytes:
         try:
-            response = self._session.get(self._feed_url, timeout=30)
-        except Exception as exc:
-            # Request exceptions quote the URL, so report only the exception type.
-            raise CalendarFeedError(f"Calendar Feed fetch failed: {type(exc).__name__}") from None
+            response = send_with_retry(
+                lambda: self._session.get(self._feed_url, timeout=30), "Calendar Feed fetch", sleep=self._sleep
+            )
+        except HttpError as exc:
+            raise CalendarFeedError(str(exc)) from None
         if response.status_code != 200:
             raise CalendarFeedError(f"Calendar Feed fetch failed: HTTP {response.status_code}")
         return response.content
 
 
 def parse_feed(raw: bytes) -> list[Assignment]:
-    calendar = icalendar.Calendar.from_ical(raw)
+    """The feed's Assignments. A body that isn't a calendar at all (say, a login page) fails the
+    whole read, rather than looking like an empty feed in which every Assignment went missing."""
+    try:
+        calendar = icalendar.Calendar.from_ical(raw)
+    except ValueError:
+        calendar = None
+    if calendar is None or calendar.name != "VCALENDAR":
+        raise CalendarFeedError("Calendar Feed is not a calendar; was the feed address changed?")
     assignments = []
     for event in calendar.walk("VEVENT"):
         uid_match = _UID.match(str(event.get("UID", "")))
         if uid_match is None:
             continue
-        assignment = _to_assignment(uid_match.group(1), event)
+        try:
+            assignment = _to_assignment(uid_match.group(1), event)
+        except Exception as exc:
+            log.warning(
+                "Skipping Assignment %s: unreadable in the feed (%s)", uid_match.group(1), type(exc).__name__
+            )
+            continue
         if assignment is not None:
             assignments.append(assignment)
     return assignments
@@ -94,9 +119,11 @@ def _to_assignment(assignment_id: str, event: icalendar.cal.Component) -> Assign
     )
 
 
-def _due(value: date | datetime) -> CanvasDueDate:
+def _due(value: object) -> CanvasDueDate:
     if isinstance(value, datetime):
         if value.tzinfo is None:
             return value.replace(tzinfo=timezone.utc)
         return value.astimezone(timezone.utc)
-    return value
+    if isinstance(value, date):
+        return value
+    raise ValueError("DTSTART is not a date or date-time")

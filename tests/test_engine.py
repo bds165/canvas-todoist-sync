@@ -191,3 +191,18 @@ def test_failed_run_still_reports_tasks_already_created():
     partial = raised.value.result.state
     assert set(partial.assignments) == {"1001"}
     assert partial.assignments["1001"].task_id == todoist.task_titled("Essay 1").id
+
+
+def test_date_only_sync_window_counts_whole_days_in_auckland():
+    # 12:00 UTC on 5 Oct is 01:00 on 6 Oct in Auckland (NZDT, UTC+13).
+    now = datetime(2026, 10, 5, 12, 0, tzinfo=timezone.utc)
+    todoist = FakeTodoist()
+    canvas = FakeCanvasSource([
+        assignment("1", title="Last Lookahead day", due=date(2026, 11, 6)),
+        assignment("2", title="Past Lookback", due=date(2026, 9, 30)),
+        assignment("3", title="First Lookback day", due=date(2026, 10, 1)),
+    ])
+
+    run_sync(canvas, todoist, None, Config(), now)
+
+    assert {t.content for t in todoist.tasks.values()} == {"Last Lookahead day", "First Lookback day"}

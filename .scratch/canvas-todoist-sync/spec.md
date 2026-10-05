@@ -160,6 +160,7 @@ A small Python script runs every 3 hours on GitHub Actions in a private repo. It
 | `lookback_days` | `5` |
 | `sync_end_date` | `2027-08-01` |
 | `dry_run` | `false` |
+| `timezone` | `Pacific/Auckland`: whose calendar days count, both for date-only Canvas Due Dates and for dates the sync writes to Todoist |
 
 **Secrets** (environment variables, or a git-ignored `.env` locally): `CANVAS_CALENDAR_FEED_URL` and `TODOIST_TOKEN`.
 
@@ -183,7 +184,7 @@ A small Python script runs every 3 hours on GitHub Actions in a private repo. It
 3. **Missing state:**
    - Adopt active tasks in the School Project whose description contains a matching Assignment link.
    - Mark School Project tasks completed in the last 3 months with a matching link as `dismissed`.
-4. **New Assignment** (no state entry): create a Synced Task only if its course passes the allowlist and its Canvas Due Date falls inside the Sync Window. Date-only due dates are compared as whole days.
+4. **New Assignment** (no state entry): create a Synced Task only if its course passes the allowlist and its Canvas Due Date falls inside the Sync Window. Date-only due dates are compared as whole days in the configured `timezone` (Auckland). Timed due dates are exact moments, sent to Todoist as fixed UTC.
 5. **Existing `open` entry:** if the Canvas Due Date differs from the last-synced value, update the task's due date. This includes:
    - a time-only change
    - a switch between date-only and timed
@@ -215,7 +216,7 @@ A small Python script runs every 3 hours on GitHub Actions in a private repo. It
 
 ### Dependencies
 
-`requests`, `icalendar`, a YAML parser, and the standard library. `pytest` for development. No Todoist SDK. The code must run on Python 3.12, even though local development uses a newer version.
+`requests`, `icalendar`, a YAML parser, `tzdata` (time zone data for `zoneinfo`), and the standard library. `pytest` for development. No Todoist SDK. The code must run on Python 3.12, even though local development uses a newer version.
 
 ## Testing Decisions
 

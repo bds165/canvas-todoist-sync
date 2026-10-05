@@ -68,12 +68,12 @@ def run_sync(
 
 
 def _in_sync_window(assignment: Assignment, config: Config, now: datetime) -> bool:
-    """Timed due dates are compared to the moment; date-only ones as whole days."""
+    """Timed due dates are compared to the moment; date-only ones as whole local days."""
     lookback = timedelta(days=config.lookback_days)
     lookahead = timedelta(days=config.lookahead_days)
     if isinstance(assignment.due, datetime):
         return now - lookback <= assignment.due <= now + lookahead
-    today = now.date()
+    today = now.astimezone(config.timezone).date()
     return today - lookback <= assignment.due <= today + lookahead
 
 

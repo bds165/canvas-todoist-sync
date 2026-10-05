@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
@@ -21,6 +22,8 @@ class Config:
     lookback_days: int = 5
     sync_end_date: date = date(2027, 8, 1)
     dry_run: bool = False
+    # Whose calendar days count: date-only Canvas Due Dates and dates written to Todoist.
+    timezone: ZoneInfo = ZoneInfo("Pacific/Auckland")
 
 
 @dataclass(frozen=True)
@@ -48,6 +51,10 @@ def load_config(path: Path) -> Config:
     dry_run = raw.get("dry_run", defaults.dry_run)
     if not isinstance(dry_run, bool):
         raise ConfigError(f"dry_run in {path} must be true or false")
+    try:
+        tz = ZoneInfo(raw["timezone"]) if "timezone" in raw else defaults.timezone
+    except (ZoneInfoNotFoundError, ValueError):
+        raise ConfigError(f"Unknown timezone in {path}: {raw['timezone']!r}") from None
     sync_end_date = raw.get("sync_end_date", defaults.sync_end_date)
     if isinstance(sync_end_date, str):
         sync_end_date = date.fromisoformat(sync_end_date)
@@ -61,6 +68,7 @@ def load_config(path: Path) -> Config:
         lookback_days=int(raw.get("lookback_days", defaults.lookback_days)),
         sync_end_date=sync_end_date,
         dry_run=dry_run,
+        timezone=tz,
     )
 
 

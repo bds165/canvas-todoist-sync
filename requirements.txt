@@ -1,3 +1,4 @@
 requests>=2.32
 icalendar>=6.0
 PyYAML>=6.0
+tzdata  # time zone data for zoneinfo on Windows; icalendar needs it too

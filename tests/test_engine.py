@@ -206,3 +206,373 @@ def test_date_only_sync_window_counts_whole_days_in_auckland():
     run_sync(canvas, todoist, None, Config(), now)
 
     assert {t.content for t in todoist.tasks.values()} == {"Last Lookahead day", "First Lookback day"}
+
+
+# -- Canvas Due Date changes ---------------------------------------------------
+
+LATER = datetime(2026, 10, 6, 9, 0, tzinfo=timezone.utc)
+NEW_DUE = datetime(2026, 10, 12, 10, 59, tzinfo=timezone.utc)
+
+
+def synced(todoist: FakeTodoist, *assignments: Assignment, config: Config = Config()):
+    """State after a first run that created a Synced Task for each Assignment."""
+    result = run_sync(FakeCanvasSource(list(assignments)), todoist, None, config, NOW)
+    todoist.writes.clear()
+    return result.state
+
+
+def test_canvas_due_date_change_updates_task_and_notes_it():
+    todoist = FakeTodoist()
+    state = synced(todoist, assignment())
+
+    result = run_sync(FakeCanvasSource([assignment(due=NEW_DUE)]), todoist, state, Config(), LATER)
+
+    task = todoist.task_titled("Essay 1")
+    assert task.due == NEW_DUE
+    # 9:00 UTC on 6 Oct is 22:00 on 6 Oct in Auckland.
+    assert task.description == (
+        "https://canvas.example.edu/courses/77/assignments/1001\n\n"
+        "Due date updated from Canvas on 2026-10-06"
+    )
+    assert result.state.assignments["1001"].canvas_due == NEW_DUE
+    assert str(result.summary) == "created 0, updated 1, skipped 0, errors 0"
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        pytest.param(datetime(2026, 10, 10, 10, 59, tzinfo=timezone.utc),
+                     datetime(2026, 10, 10, 9, 0, tzinfo=timezone.utc), id="time only"),
+        pytest.param(date(2026, 10, 10), datetime(2026, 10, 10, 10, 59, tzinfo=timezone.utc), id="date-only to timed"),
+        pytest.param(datetime(2026, 10, 10, 10, 59, tzinfo=timezone.utc), date(2026, 10, 10), id="timed to date-only"),
+        pytest.param(date(2026, 10, 10), date(2027, 3, 1), id="outside the Sync Window"),
+    ],
+)
+def test_every_kind_of_canvas_due_date_change_is_applied(before, after):
+    todoist = FakeTodoist()
+    state = synced(todoist, assignment(due=before))
+
+    result = run_sync(FakeCanvasSource([assignment(due=after)]), todoist, state, Config(), LATER)
+
+    task = todoist.task_titled("Essay 1")
+    assert task.due == after and type(task.due) is type(after)
+    assert task.description.endswith("Due date updated from Canvas on 2026-10-06")
+    assert result.state.assignments["1001"].canvas_due == after
+    assert result.summary.updated == 1
+
+
+def test_due_date_note_keeps_my_edits_to_title_and_description():
+    todoist = FakeTodoist()
+    state = synced(todoist, assignment())
+    task = todoist.task_titled("Essay 1")
+    task.content = "Essay 1: draft first!"
+    task.description = "My plan: outline on Monday"
+
+    run_sync(FakeCanvasSource([assignment(due=NEW_DUE)]), todoist, state, Config(), LATER)
+
+    assert task.content == "Essay 1: draft first!"
+    assert task.description == "My plan: outline on Monday\n\nDue date updated from Canvas on 2026-10-06"
+    assert todoist.writes == [("update_task", task.id)]
+
+
+def test_my_reschedule_stands_while_canvas_due_date_is_unchanged():
+    todoist = FakeTodoist()
+    state = synced(todoist, assignment())
+    task = todoist.task_titled("Essay 1")
+    todoist.reschedule(task.id, date(2026, 10, 8))
+
+    result = run_sync(FakeCanvasSource([assignment()]), todoist, state, Config(), LATER)
+
+    assert task.due == date(2026, 10, 8)
+    assert todoist.writes == []
+    assert result.summary.updated == 0
+
+
+def test_my_reschedule_is_overwritten_when_canvas_due_date_changes():
+    todoist = FakeTodoist()
+    state = synced(todoist, assignment())
+    task = todoist.task_titled("Essay 1")
+    todoist.reschedule(task.id, date(2026, 10, 8))
+
+    run_sync(FakeCanvasSource([assignment(due=NEW_DUE)]), todoist, state, Config(), LATER)
+
+    assert task.due == NEW_DUE
+
+
+def test_second_run_after_a_due_date_change_makes_no_writes():
+    todoist = FakeTodoist()
+    state = synced(todoist, assignment())
+    canvas = FakeCanvasSource([assignment(due=NEW_DUE)])
+    first = run_sync(canvas, todoist, state, Config(), LATER)
+    todoist.writes.clear()
+
+    second = run_sync(canvas, todoist, first.state, Config(), LATER)
+
+    assert todoist.writes == []
+    assert str(second.summary) == "created 0, updated 0, skipped 0, errors 0"
+
+
+def test_dry_run_due_date_change_writes_nothing():
+    todoist = FakeTodoist()
+    state = synced(todoist, assignment())
+
+    result = run_sync(FakeCanvasSource([assignment(due=NEW_DUE)]), todoist, state, Config(dry_run=True), LATER)
+
+    assert todoist.writes == []
+    assert result.state.assignments["1001"].canvas_due == datetime(2026, 10, 10, 10, 59, tzinfo=timezone.utc)
+    assert result.summary.updated == 1
+
+
+# -- Dismissed and NEW_DUE tasks --------------------------------------------------
+
+
+@pytest.mark.parametrize("dismiss", ["complete", "delete"])
+def test_task_i_completed_or_deleted_is_dismissed_and_never_touched_again(dismiss):
+    todoist = FakeTodoist()
+    state = synced(todoist, assignment())
+    task_id = todoist.task_titled("Essay 1").id
+    if dismiss == "complete":
+        todoist.complete(task_id, at=NOW)
+    else:
+        todoist.delete(task_id)
+    canvas = FakeCanvasSource([assignment(due=NEW_DUE)])
+
+    first = run_sync(canvas, todoist, state, Config(), LATER)
+    second = run_sync(canvas, todoist, first.state, Config(), LATER)
+
+    assert first.state.assignments["1001"].status == "dismissed"
+    assert second.state.assignments["1001"].status == "dismissed"
+    assert todoist.writes == []
+    assert todoist.tasks == {}
+    assert str(second.summary) == "created 0, updated 0, skipped 0, errors 0"
+
+
+def test_task_i_moved_to_another_project_is_not_dismissed():
+    todoist = FakeTodoist()
+    state = synced(todoist, assignment())
+    task = todoist.task_titled("Essay 1")
+    todoist.move(task.id, todoist.create_project("Personal"))
+    todoist.writes.clear()
+
+    result = run_sync(FakeCanvasSource([assignment(due=NEW_DUE)]), todoist, state, Config(), LATER)
+
+    assert result.state.assignments["1001"].status == "open"
+    assert task.due == NEW_DUE
+    assert todoist.writes == [("update_task", task.id)]
+
+
+# -- Course Section resilience --------------------------------------------------
+
+
+def test_section_i_renamed_keeps_being_used():
+    todoist = FakeTodoist()
+    state = synced(todoist, assignment("1001"))
+    section_id = todoist.task_titled("Essay 1").section_id
+    assert section_id is not None
+    todoist.rename_section(section_id, "Programming 🖥")
+
+    run_sync(FakeCanvasSource([assignment("1002", title="Quiz 1")]), todoist, state, Config(), LATER)
+
+    assert todoist.task_titled("Quiz 1").section_id == section_id
+    assert len(todoist.sections) == 1
+
+
+def test_section_i_deleted_is_not_recreated_until_a_new_task_needs_it():
+    todoist = FakeTodoist()
+    state = synced(todoist, assignment("1001"))
+    todoist.delete_section(todoist.task_titled("Essay 1").section_id)
+
+    result = run_sync(FakeCanvasSource([assignment("1001")]), todoist, state, Config(), LATER)
+
+    assert todoist.writes == []
+    assert todoist.sections == {}
+    assert result.state.assignments["1001"].status == "dismissed"
+
+
+def test_section_i_deleted_is_recreated_by_name_for_a_new_task():
+    todoist = FakeTodoist()
+    state = synced(todoist, assignment("1001"))
+    old_section = todoist.task_titled("Essay 1").section_id
+    todoist.delete_section(old_section)
+    canvas = FakeCanvasSource([assignment("1001"), assignment("1002", title="Quiz 1")])
+
+    result = run_sync(canvas, todoist, state, Config(), LATER)
+
+    new_section = todoist.task_titled("Quiz 1").section_id
+    assert new_section != old_section
+    assert todoist.section_name(new_section) == "COMPSCI 101"
+    assert result.state.courses["77"].section_id == new_section
+
+
+def test_existing_task_in_another_section_is_never_moved():
+    todoist = FakeTodoist()
+    state = synced(todoist, assignment("1001"))
+    task = todoist.task_titled("Essay 1")
+    todoist.move(task.id, task.project_id, todoist.create_section(task.project_id, "This week"))
+    todoist.writes.clear()
+
+    run_sync(FakeCanvasSource([assignment("1001", due=NEW_DUE)]), todoist, state, Config(), LATER)
+
+    assert todoist.section_name(task.section_id) == "This week"
+    assert todoist.writes == [("update_task", task.id)]
+
+
+# -- Missing from Canvas --------------------------------------------------------
+
+
+def test_assignment_gone_from_feed_is_missing_from_canvas_logged_once_and_task_untouched(caplog):
+    caplog.set_level("INFO")
+    todoist = FakeTodoist()
+    state = synced(todoist, assignment())
+    task = todoist.task_titled("Essay 1")
+    empty_feed = FakeCanvasSource([])
+
+    first = run_sync(empty_feed, todoist, state, Config(), LATER)
+    second = run_sync(empty_feed, todoist, first.state, Config(), LATER)
+
+    entry = second.state.assignments["1001"]
+    assert entry.status == "missing_from_canvas"
+    assert entry.previous_status == "open"
+    assert caplog.text.lower().count("missing from canvas") == 1
+    assert todoist.writes == []
+    assert task.due == datetime(2026, 10, 10, 10, 59, tzinfo=timezone.utc)
+
+
+def test_assignment_back_in_feed_resumes_syncing_its_due_date():
+    todoist = FakeTodoist()
+    state = synced(todoist, assignment())
+    gone = run_sync(FakeCanvasSource([]), todoist, state, Config(), LATER)
+
+    back = run_sync(FakeCanvasSource([assignment(due=NEW_DUE)]), todoist, gone.state, Config(), LATER)
+
+    entry = back.state.assignments["1001"]
+    assert (entry.status, entry.previous_status) == ("open", None)
+    assert todoist.task_titled("Essay 1").due == NEW_DUE
+    assert back.summary.updated == 1
+
+
+def test_dismissed_assignment_gone_from_feed_stays_dismissed():
+    todoist = FakeTodoist()
+    state = synced(todoist, assignment())
+    todoist.delete(todoist.task_titled("Essay 1").id)
+    dismissed = run_sync(FakeCanvasSource([assignment()]), todoist, state, Config(), LATER)
+
+    gone = run_sync(FakeCanvasSource([]), todoist, dismissed.state, Config(), LATER)
+    back = run_sync(FakeCanvasSource([assignment()]), todoist, gone.state, Config(), LATER)
+
+    assert gone.state.assignments["1001"].status == "dismissed"
+    assert back.state.assignments["1001"].status == "dismissed"
+    assert todoist.writes == []
+
+
+def test_task_dismissed_while_missing_from_canvas_stays_dismissed_on_return():
+    todoist = FakeTodoist()
+    state = synced(todoist, assignment())
+    gone = run_sync(FakeCanvasSource([]), todoist, state, Config(), LATER)
+    todoist.complete(todoist.task_titled("Essay 1").id, at=LATER)
+
+    back = run_sync(FakeCanvasSource([assignment(due=NEW_DUE)]), todoist, gone.state, Config(), LATER)
+
+    assert back.state.assignments["1001"].status == "dismissed"
+    assert todoist.writes == []
+
+
+# -- Rebuilding missing state ---------------------------------------------------
+
+
+def school_with_task(todoist: FakeTodoist, description: str, due: date | datetime = date(2026, 10, 9)) -> str:
+    project_id = todoist.find_project("School") or todoist.create_project("School")
+    task_id = todoist.add_task("Essay 1 (renamed)", description, project_id, due)
+    todoist.writes.clear()
+    return task_id
+
+
+def test_without_state_active_task_with_assignment_link_is_adopted():
+    todoist = FakeTodoist()
+    task_id = school_with_task(todoist, "notes\nhttps://canvas.example.edu/courses/77/assignments/1001")
+
+    result = run_sync(FakeCanvasSource([assignment()]), todoist, None, Config(), NOW)
+
+    entry = result.state.assignments["1001"]
+    assert (entry.task_id, entry.status) == (task_id, "open")
+    assert entry.canvas_due == datetime(2026, 10, 10, 10, 59, tzinfo=timezone.utc)
+    assert todoist.writes == []
+    assert len(todoist.tasks) == 1
+    assert str(result.summary) == "created 0, updated 0, skipped 0, errors 0"
+
+
+def test_without_state_link_to_a_longer_assignment_id_is_not_a_match():
+    todoist = FakeTodoist()
+    school_with_task(todoist, "https://canvas.example.edu/courses/77/assignments/10010")
+
+    result = run_sync(FakeCanvasSource([assignment("1001")]), todoist, None, Config(), NOW)
+
+    assert result.summary.created == 1
+
+
+def test_without_state_task_in_another_project_is_not_adopted():
+    todoist = FakeTodoist()
+    personal = todoist.create_project("Personal")
+    todoist.add_task("Essay 1", "https://canvas.example.edu/courses/77/assignments/1001", personal, date(2026, 10, 9))
+
+    result = run_sync(FakeCanvasSource([assignment()]), todoist, None, Config(), NOW)
+
+    assert result.summary.created == 1
+
+
+def test_without_state_task_completed_in_last_3_months_is_dismissed():
+    todoist = FakeTodoist()
+    recent = school_with_task(todoist, "https://canvas.example.edu/courses/77/assignments/1001")
+    todoist.complete(recent, at=datetime(2026, 7, 10, tzinfo=timezone.utc))
+    canvas = FakeCanvasSource([assignment("1001")])
+
+    first = run_sync(canvas, todoist, None, Config(), NOW)
+    second = run_sync(canvas, todoist, first.state, Config(), NOW)
+
+    entry = second.state.assignments["1001"]
+    assert (entry.task_id, entry.status) == (recent, "dismissed")
+    assert todoist.tasks == {}
+    assert todoist.writes == []
+
+
+def test_without_state_task_completed_over_3_months_ago_does_not_count():
+    todoist = FakeTodoist()
+    old = school_with_task(todoist, "https://canvas.example.edu/courses/77/assignments/1001")
+    todoist.complete(old, at=datetime(2026, 6, 1, tzinfo=timezone.utc))
+
+    result = run_sync(FakeCanvasSource([assignment("1001")]), todoist, None, Config(), NOW)
+
+    assert result.summary.created == 1
+
+
+def test_without_state_and_without_school_project_nothing_is_adopted():
+    todoist = FakeTodoist()
+
+    result = run_sync(FakeCanvasSource([assignment()]), todoist, None, Config(dry_run=True), NOW)
+
+    assert todoist.writes == []
+    assert result.summary.created == 1
+
+
+# -- Idempotence ----------------------------------------------------------------
+
+
+def test_second_run_without_feed_changes_makes_no_writes_whatever_the_statuses():
+    todoist = FakeTodoist()
+    canvas = FakeCanvasSource([
+        assignment("1", title="Open"),
+        assignment("2", title="Dismissed"),
+        assignment("3", title="Missing"),
+        assignment("4", title="Far off", due=date(2027, 3, 1)),
+    ])
+    state = run_sync(canvas, todoist, None, Config(), NOW).state
+    todoist.delete(todoist.task_titled("Dismissed").id)
+    canvas.assignments = [a for a in canvas.assignments if a.title != "Missing"]
+    first = run_sync(canvas, todoist, state, Config(), LATER)
+    todoist.writes.clear()
+
+    second = run_sync(canvas, todoist, first.state, Config(), LATER)
+
+    assert todoist.writes == []
+    assert second.state == first.state
+    assert str(second.summary) == "created 0, updated 0, skipped 1, errors 0"

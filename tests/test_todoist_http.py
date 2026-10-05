@@ -104,3 +104,53 @@ def test_failed_request_does_not_reveal_token(caplog):
     assert "401" in str(raised.value)
     assert TOKEN not in str(raised.value)
     assert TOKEN not in caplog.text
+
+
+def test_active_tasks_are_listed_across_all_projects():
+    gw, session = gateway(
+        CannedResponse(200, {"results": [{"id": "t1", "project_id": "p1", "description": "a", "content": "A"}],
+                             "next_cursor": "c2"}),
+        CannedResponse(200, {"results": [{"id": "t2", "project_id": "p2", "description": "", "content": "B"}],
+                             "next_cursor": None}),
+    )
+
+    tasks = gw.list_active_tasks()
+
+    assert [(t.id, t.project_id, t.description) for t in tasks] == [("t1", "p1", "a"), ("t2", "p2", "")]
+    assert session.requests[0]["url"] == f"{API}/tasks"
+    assert "project_id" not in session.requests[0]["params"]
+
+
+def test_completed_tasks_are_listed_by_completion_date_in_the_project():
+    gw, session = gateway(
+        CannedResponse(200, {"items": [{"id": "t1", "project_id": "p1", "description": "link"}], "next_cursor": "c2"}),
+        CannedResponse(200, {"items": [{"id": "t2", "project_id": "p1", "description": None}], "next_cursor": None}),
+    )
+
+    tasks = gw.list_completed_tasks(
+        "p1", since=datetime(2026, 7, 8, 9, 0, tzinfo=timezone.utc), until=datetime(2026, 10, 5, 9, 0, tzinfo=timezone.utc)
+    )
+
+    assert [(t.id, t.description) for t in tasks] == [("t1", "link"), ("t2", "")]
+    sent = session.requests[0]
+    assert sent["url"] == f"{API}/tasks/completed/by_completion_date"
+    assert sent["params"]["project_id"] == "p1"
+    assert (sent["params"]["since"], sent["params"]["until"]) == ("2026-07-08T09:00:00Z", "2026-10-05T09:00:00Z")
+    assert session.requests[1]["params"]["cursor"] == "c2"
+
+
+@pytest.mark.parametrize(
+    ("due", "due_fields"),
+    [
+        (datetime(2026, 10, 12, 10, 59, tzinfo=timezone.utc), {"due_datetime": "2026-10-12T10:59:00Z"}),
+        (date(2026, 10, 12), {"due_date": "2026-10-12"}),
+    ],
+)
+def test_update_task_sends_only_due_date_and_description(due, due_fields):
+    gw, session = gateway(CannedResponse(200, {"id": "t1"}))
+
+    gw.update_task("t1", due=due, description="notes\n\nDue date updated from Canvas on 2026-10-06")
+
+    sent = session.requests[0]
+    assert (sent["method"], sent["url"]) == ("POST", f"{API}/tasks/t1")
+    assert sent["json"] == {"description": "notes\n\nDue date updated from Canvas on 2026-10-06", **due_fields}

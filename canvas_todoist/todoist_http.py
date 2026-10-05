@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any, Protocol
 
 from canvas_todoist.models import CanvasDueDate, format_utc
+from canvas_todoist.todoist import TodoistTask
 
 API = "https://api.todoist.com/api/v1"
 
@@ -63,12 +64,24 @@ class TodoistHttpGateway:
         payload.update(_due_fields(due))
         return str(self._call("POST", "/tasks", json=payload)["id"])
 
-    def _list(self, path: str, params: dict[str, str] | None = None) -> Iterator[dict[str, Any]]:
+    def list_active_tasks(self) -> list[TodoistTask]:
+        return [_task(t) for t in self._list("/tasks")]
+
+    def list_completed_tasks(self, project_id: str, since: datetime, until: datetime) -> list[TodoistTask]:
+        params = {"project_id": project_id, "since": format_utc(since), "until": format_utc(until)}
+        return [_task(t) for t in self._list("/tasks/completed/by_completion_date", params, key="items")]
+
+    def update_task(self, task_id: str, *, due: CanvasDueDate, description: str) -> None:
+        self._call("POST", f"/tasks/{task_id}", json={"description": description, **_due_fields(due)})
+
+    def _list(
+        self, path: str, params: dict[str, str] | None = None, *, key: str = "results"
+    ) -> Iterator[dict[str, Any]]:
         """Every item of a paginated v1 list endpoint."""
         params = dict(params or {}, limit="200")
         while True:
             page = self._call("GET", path, params=params)
-            yield from page["results"]
+            yield from page[key]
             if not page.get("next_cursor"):
                 return
             params["cursor"] = page["next_cursor"]
@@ -96,3 +109,7 @@ def _due_fields(due: CanvasDueDate) -> dict[str, str]:
     if isinstance(due, datetime):
         return {"due_datetime": format_utc(due)}
     return {"due_date": due.isoformat()}
+
+
+def _task(raw: dict[str, Any]) -> TodoistTask:
+    return TodoistTask(str(raw["id"]), str(raw["project_id"]), raw.get("description") or "")

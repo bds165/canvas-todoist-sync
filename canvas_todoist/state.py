@@ -23,6 +23,8 @@ class AssignmentState:
     task_id: str
     canvas_due: CanvasDueDate
     status: Status = "open"
+    # The status to restore when a missing_from_canvas Assignment reappears.
+    previous_status: Status | None = None
 
 
 @dataclass
@@ -39,7 +41,12 @@ def load_state(path: Path) -> State | None:
     return State(
         courses={cid: CourseState(c["section_id"]) for cid, c in raw.get("courses", {}).items()},
         assignments={
-            aid: AssignmentState(a["task_id"], _parse_due(a["canvas_due"]), cast(Status, a["status"]))
+            aid: AssignmentState(
+                a["task_id"],
+                _parse_due(a["canvas_due"]),
+                cast(Status, a["status"]),
+                cast(Status | None, a.get("previous_status")),
+            )
             for aid, a in raw.get("assignments", {}).items()
         },
     )
@@ -48,12 +55,16 @@ def load_state(path: Path) -> State | None:
 def save_state(path: Path, state: State) -> None:
     raw: dict[str, Any] = {
         "courses": {cid: {"section_id": c.section_id} for cid, c in state.courses.items()},
-        "assignments": {
-            aid: {"task_id": a.task_id, "canvas_due": _format_due(a.canvas_due), "status": a.status}
-            for aid, a in state.assignments.items()
-        },
+        "assignments": {aid: _assignment_json(a) for aid, a in state.assignments.items()},
     }
     path.write_text(json.dumps(raw, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _assignment_json(entry: AssignmentState) -> dict[str, str]:
+    raw = {"task_id": entry.task_id, "canvas_due": _format_due(entry.canvas_due), "status": entry.status}
+    if entry.previous_status is not None:
+        raw["previous_status"] = entry.previous_status
+    return raw
 
 
 def _format_due(due: CanvasDueDate) -> str:

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 
 from canvas_todoist.models import Assignment
+from canvas_todoist.todoist import TodoistTask
 
 
 class FakeCanvasSource:
@@ -24,6 +25,10 @@ class FakeTask:
     project_id: str
     section_id: str | None
     due: date | datetime
+    completed_at: datetime | None = None
+
+    def view(self) -> TodoistTask:
+        return TodoistTask(self.id, self.project_id, self.description)
 
 
 class FakeTodoist:
@@ -32,7 +37,8 @@ class FakeTodoist:
     def __init__(self) -> None:
         self.projects: dict[str, str] = {}  # id -> name
         self.sections: dict[str, tuple[str, str]] = {}  # id -> (project_id, name)
-        self.tasks: dict[str, FakeTask] = {}
+        self.tasks: dict[str, FakeTask] = {}  # active tasks
+        self.completed: dict[str, FakeTask] = {}
         self.writes: list[tuple[str, object]] = []
         self._next_id = 1
         self.fail_creates_after: int | None = None  # simulate Todoist failing mid-run
@@ -76,6 +82,52 @@ class FakeTodoist:
         tid = self._new_id()
         self.tasks[tid] = FakeTask(tid, content, description, project_id, section_id, due)
         self.writes.append(("create_task", content))
+        return tid
+
+    def list_active_tasks(self) -> list[TodoistTask]:
+        return [t.view() for t in self.tasks.values()]
+
+    def list_completed_tasks(self, project_id: str, since: datetime, until: datetime) -> list[TodoistTask]:
+        return [
+            t.view() for t in self.completed.values()
+            if t.project_id == project_id and t.completed_at is not None and since <= t.completed_at < until
+        ]
+
+    def update_task(self, task_id: str, *, due: date | datetime, description: str) -> None:
+        task = self.tasks[task_id]
+        task.due, task.description = due, description
+        self.writes.append(("update_task", task_id))
+
+    # -- what the user does in Todoist ----------------------------------
+
+    def complete(self, task_id: str, at: datetime) -> None:
+        task = self.tasks.pop(task_id)
+        task.completed_at = at
+        self.completed[task_id] = task
+
+    def delete(self, task_id: str) -> None:
+        del self.tasks[task_id]
+
+    def reschedule(self, task_id: str, due: date | datetime) -> None:
+        self.tasks[task_id].due = due
+
+    def move(self, task_id: str, project_id: str, section_id: str | None = None) -> None:
+        task = self.tasks[task_id]
+        task.project_id, task.section_id = project_id, section_id
+
+    def delete_section(self, section_id: str | None) -> None:
+        """As in Todoist, deleting a section deletes its tasks too."""
+        del self.sections[section_id]
+        self.tasks = {tid: t for tid, t in self.tasks.items() if t.section_id != section_id}
+
+    def rename_section(self, section_id: str, name: str) -> None:
+        project_id, _ = self.sections[section_id]
+        self.sections[section_id] = (project_id, name)
+
+    def add_task(self, content: str, description: str, project_id: str, due: date | datetime) -> str:
+        """A task that exists in Todoist without this run having created it."""
+        tid = self._new_id()
+        self.tasks[tid] = FakeTask(tid, content, description, project_id, None, due)
         return tid
 
     # -- test helpers ---------------------------------------------------

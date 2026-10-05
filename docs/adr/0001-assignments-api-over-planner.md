@@ -1,3 +1,7 @@
+---
+status: superseded by ADR-0002
+---
+
 # Use the per-course Assignments API, not the Planner API
 
 We fetch Assignments course by course from `GET /api/v1/courses/:id/assignments?include[]=submission` and do not use the Planner API (`/api/v1/planner/items`). The Assignments API reports `published` and `locked_for_user`, which the skip rules depend on, and every result has a stable assignment ID that serves as the key in the state file. The Planner API returns everything in one call and also covers ungraded to-do items. However, its docs don't say whether locked or unpublished items are excluded or which fields `plannable` includes, and ungraded items have no submission, so the sync could never decide they are Done.

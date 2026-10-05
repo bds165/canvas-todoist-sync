@@ -4,16 +4,16 @@ A one-way copy of Canvas coursework into Todoist. Canvas is the source of truth 
 
 ## Canvas side
 
-**Assignment**:
-A gradable Canvas item that has a Canvas assignment ID. This includes quizzes and graded discussions. Ungraded to-do items and planner notes are not Assignments.
-_Avoid_: planner item, to-do, homework
+**Calendar Feed**:
+The student's private Canvas calendar subscription address. It lists their dated Assignments and calendar events across all courses, and it is the sync's only source of Canvas data.
+_Avoid_: ICS link, iCal URL, calendar export, API
 
-**Done**:
-The state of an Assignment whose submission is submitted, graded or excused.
-_Avoid_: complete, finished (those words describe Todoist tasks)
+**Assignment**:
+A gradable Canvas item with a Canvas assignment ID, as it appears in the Calendar Feed. This includes quizzes and graded discussions. Ordinary calendar events (lectures, office hours) are not Assignments.
+_Avoid_: event, planner item, to-do, homework
 
 **Canvas Due Date**:
-The due moment Canvas reports for an Assignment.
+The due moment the Calendar Feed reports for an Assignment. It is either a date and time, or a date only (an all-day Assignment).
 _Avoid_: deadline
 
 ## Todoist side
@@ -41,17 +41,14 @@ _Avoid_: range, horizon
 How far into the future the Sync Window reaches.
 
 **Lookback**:
-How far into the past the Sync Window reaches, so that recently overdue, not-yet-Done Assignments still get a Synced Task.
-
-**Closed by Sync**:
-A Synced Task that the sync completed because its Assignment became Done. The sync closes a task at most once.
+How far into the past the Sync Window reaches, so that recently overdue Assignments still get a Synced Task.
 
 **Dismissed**:
-A Synced Task that the user completed or deleted in Todoist. The sync treats both the same way and never touches the task again.
-_Avoid_: user-completed, user-deleted
+A Synced Task that the user completed or deleted in Todoist. The sync treats both the same way and never touches the task again. The user, not the sync, finishes Synced Tasks.
+_Avoid_: user-completed, user-deleted, done
 
 **Missing from Canvas**:
-The status of an Assignment that has a Synced Task but no longer appears in Canvas, whether it was deleted or unpublished, or its course left scope.
+The status of an Assignment that has a Synced Task but no longer appears in the Calendar Feed. It may have been deleted or unpublished, lost its due date, or moved outside the feed's range; the sync cannot tell which.
 
 ## Project lifecycle
 
@@ -62,5 +59,5 @@ The last day the sync does any work. After it, the sync is Retired.
 The state after the Sync End Date, in which runs do nothing and the scheduled workflow switches itself off.
 
 **Decommission**:
-The manual teardown after retirement: revoking tokens, removing secrets, and archiving the School Project and the repo.
+The manual teardown after retirement: resetting the Todoist token, removing the secrets (including the Calendar Feed address), and archiving the School Project and the repo.
 _Avoid_: shutdown, uninstall

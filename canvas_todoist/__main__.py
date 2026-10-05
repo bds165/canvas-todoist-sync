@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import logging
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -54,10 +55,22 @@ def main(argv: list[str] | None = None) -> int:
         log.error("Sync failed: %s", exc)
         return 1
 
+    if result.retired:
+        print("Sync retired")
+        _set_workflow_output("retired", "true")
+        return 0
     if not config.dry_run:
         save_state(args.state, result.state)
     print(f"{'Dry run: ' if config.dry_run else ''}{result.summary}")
     return 0
+
+
+def _set_workflow_output(name: str, value: str) -> None:
+    """Pass a value to later GitHub Actions steps; does nothing outside Actions."""
+    output = os.environ.get("GITHUB_OUTPUT")
+    if output:
+        with open(output, "a", encoding="utf-8") as file:
+            file.write(f"{name}={value}\n")
 
 
 if __name__ == "__main__":

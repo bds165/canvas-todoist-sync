@@ -6,7 +6,7 @@ import copy
 import logging
 import re
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from canvas_todoist.canvas import CanvasSource
 from canvas_todoist.config import Config
@@ -38,6 +38,8 @@ class Summary:
 class RunResult:
     state: State
     summary: Summary
+    # Past the Sync End Date: nothing was read or written, and the state is as it was.
+    retired: bool = False
 
 
 class SyncAborted(Exception):
@@ -55,6 +57,9 @@ def run_sync(
     config: Config,
     now: datetime,
 ) -> RunResult:
+    if _local_today(now, config) > config.sync_end_date:
+        log.info("Sync retired: the Sync End Date, %s, has passed", config.sync_end_date.isoformat())
+        return RunResult(state if state is not None else State(), Summary(), retired=True)
     new_state = copy.deepcopy(state) if state is not None else State()
     run = _SyncRun(todoist, new_state, config, now)
     try:
@@ -117,13 +122,18 @@ def _changed(last_synced: CanvasDueDate, due: CanvasDueDate) -> bool:
     return type(last_synced) is not type(due) or last_synced != due
 
 
+def _local_today(now: datetime, config: Config) -> date:
+    """Today's date where the student is: the configured timezone's calendar day."""
+    return now.astimezone(config.timezone).date()
+
+
 def _in_sync_window(assignment: Assignment, config: Config, now: datetime) -> bool:
     """Timed due dates are compared to the moment; date-only ones as whole local days."""
     lookback = timedelta(days=config.lookback_days)
     lookahead = timedelta(days=config.lookahead_days)
     if isinstance(assignment.due, datetime):
         return now - lookback <= assignment.due <= now + lookahead
-    today = now.astimezone(config.timezone).date()
+    today = _local_today(now, config)
     return today - lookback <= assignment.due <= today + lookahead
 
 
@@ -222,7 +232,7 @@ class _SyncRun:
 
     def update_due(self, assignment: Assignment, entry: AssignmentState, task: TodoistTask) -> None:
         """Apply a new Canvas Due Date, noting it after whatever the description now says."""
-        today = self.now.astimezone(self.config.timezone).date()
+        today = _local_today(self.now, self.config)
         note = f"Due date updated from Canvas on {today.isoformat()}"
         description = f"{task.description}\n\n{note}" if task.description else note
         if self.config.dry_run:

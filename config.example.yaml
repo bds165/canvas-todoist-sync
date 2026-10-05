@@ -1,0 +1,29 @@
+# Copy to config.yaml and change what you need. Every setting is optional;
+# the values below are the defaults. Secrets never go in this file (see .env.example).
+
+# The one Todoist project every Synced Task goes in; created if missing.
+todoist_project_name: School
+
+# Canvas course IDs to sync. Empty means every course in the Calendar Feed.
+course_allowlist: []
+#   - "123456"
+
+# Short Course Section names by course ID. Without one, the Course Section is named
+# from the course code in the feed, e.g. "COMPSCI 101".
+course_name_overrides: {}
+#   "123456": Algorithms
+
+# The Sync Window: new Synced Tasks are created only for Assignments due
+# from lookback_days ago to lookahead_days ahead.
+lookahead_days: 31
+lookback_days: 5
+
+# The last day the sync does any work. After it, the sync is Retired.
+sync_end_date: 2027-08-01
+
+# Log what would change without writing to Todoist or state.json.
+dry_run: false
+
+# Whose calendar days count, for date-only Canvas Due Dates and for dates
+# written to Todoist.
+timezone: Pacific/Auckland

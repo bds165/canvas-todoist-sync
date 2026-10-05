@@ -6,6 +6,7 @@ from canvas_todoist.calendar_feed import CalendarFeedError
 from canvas_todoist.config import Config
 from canvas_todoist.engine import SyncAborted, run_sync
 from canvas_todoist.models import Assignment
+from canvas_todoist.state import State
 from canvas_todoist.todoist import PlanLimitReached, TodoistError, TodoistRejectedToken
 
 from tests.fakes import FakeCanvasSource, FakeTodoist
@@ -325,7 +326,7 @@ def test_dry_run_due_date_change_writes_nothing():
     assert result.summary.updated == 1
 
 
-# -- Dismissed and NEW_DUE tasks --------------------------------------------------
+# -- Dismissed and moved tasks --------------------------------------------------
 
 
 @pytest.mark.parametrize("dismiss", ["complete", "delete"])
@@ -685,3 +686,42 @@ def test_run_that_cannot_read_canvas_or_todoist_fails_and_marks_nothing_missing(
 
     assert raised.value.result.state == state
     assert todoist.writes == []
+
+
+# -- Retirement ----------------------------------------------------------------
+
+
+def feed_and_todoist_that_fail_on_any_call() -> tuple[FakeCanvasSource, FakeTodoist]:
+    """A feed and a Todoist that fail on any call, so a test can show none was made."""
+    canvas = FakeCanvasSource([assignment()])
+    canvas.error = AssertionError("Calendar Feed was read")
+    todoist = FakeTodoist()
+    todoist.failures["*"] = AssertionError("Todoist was called")
+    return canvas, todoist
+
+
+def test_after_the_sync_end_date_the_sync_is_retired_and_calls_nothing(caplog):
+    caplog.set_level("INFO")
+    canvas, todoist = feed_and_todoist_that_fail_on_any_call()
+    state = State()
+    # 12:00 UTC on 1 Aug is already midnight on 2 Aug in Auckland (NZST, UTC+12).
+    now = datetime(2027, 8, 1, 12, 0, tzinfo=timezone.utc)
+
+    result = run_sync(canvas, todoist, state, Config(sync_end_date=date(2027, 8, 1)), now)
+
+    assert result.retired
+    assert result.state == state
+    assert str(result.summary) == "created 0, updated 0, skipped 0, errors 0"
+    assert "sync retired" in caplog.text.lower()
+
+
+def test_the_sync_end_date_itself_is_the_last_day_of_work():
+    todoist = FakeTodoist()
+    # 11:59 UTC on 1 Aug is 23:59 on 1 Aug in Auckland.
+    now = datetime(2027, 8, 1, 11, 59, tzinfo=timezone.utc)
+    canvas = FakeCanvasSource([assignment(due=datetime(2027, 8, 3, 10, 59, tzinfo=timezone.utc))])
+
+    result = run_sync(canvas, todoist, None, Config(sync_end_date=date(2027, 8, 1)), now)
+
+    assert not result.retired
+    assert todoist.task_titled("Essay 1")

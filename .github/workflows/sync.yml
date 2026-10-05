@@ -1,0 +1,62 @@
+name: Sync Canvas to Todoist
+
+on:
+  schedule:
+    - cron: "17 */3 * * *"  # every 3 hours, off the top of the hour when Actions is busiest
+  workflow_dispatch:
+
+# A manual run waits for a scheduled one (and vice versa) instead of racing it.
+concurrency:
+  group: sync
+  cancel-in-progress: false
+
+permissions:
+  contents: write  # commit state.json
+  actions: write   # disable this workflow once Retired
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - run: pip install -r requirements.txt
+
+      - name: Sync
+        id: sync
+        run: python -m canvas_todoist
+        env:
+          CANVAS_CALENDAR_FEED_URL: ${{ secrets.CANVAS_CALENDAR_FEED_URL }}
+          TODOIST_TOKEN: ${{ secrets.TODOIST_TOKEN }}
+
+      # Also after a failed run: it saves the state of any Synced Tasks it created first.
+      - name: Commit state
+        if: ${{ !cancelled() }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git pull --rebase --autostash
+          if [ ! -f state.json ]; then
+            echo "No state.json written"
+            exit 0
+          fi
+          if git diff --quiet -- state.json && git ls-files --error-unmatch state.json >/dev/null 2>&1; then
+            echo "state.json unchanged"
+            exit 0
+          fi
+          git add state.json
+          git commit -m "chore: sync state [skip ci]"
+          git push
+
+      - name: Disable this workflow once Retired
+        if: ${{ steps.sync.outputs.retired == 'true' }}
+        run: gh workflow disable sync.yml
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -7,12 +7,12 @@
     },
     "509058": {
       "canvas_due": "2026-10-05T04:00:00Z",
-      "status": "open",
+      "status": "dismissed",
       "task_id": "6hh2m8q86GrwFGMp"
     },
     "509063": {
       "canvas_due": "2026-10-02T04:00:00Z",
-      "status": "open",
+      "status": "dismissed",
       "task_id": "6hh2m8VX7JR8cP5p"
     },
     "509064": {
@@ -22,7 +22,7 @@
     },
     "509066": {
       "canvas_due": "2026-10-05T04:00:00Z",
-      "status": "open",
+      "status": "dismissed",
       "task_id": "6hh2m8j56vjJ2JVp"
     },
     "509068": {
@@ -52,7 +52,7 @@
     },
     "519449": {
       "canvas_due": "2026-10-02",
-      "status": "open",
+      "status": "dismissed",
       "task_id": "6hh2m8cCjmMVV9qp"
     },
     "525023": {

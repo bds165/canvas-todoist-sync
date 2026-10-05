@@ -10,7 +10,7 @@ The sync never closes tasks; I finish them myself. See `.scratch/canvas-todoist-
 
 **Blocked by:** 01 (Tracer bullet)
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Canvas Due Date changes**
 - [x] Any change from the last-synced Canvas Due Date updates the task's due date. That includes a time-only change, a switch between date-only and timed, and a new date outside the Sync Window.
@@ -46,3 +46,9 @@ The sync never closes tasks; I finish them myself. See `.scratch/canvas-todoist-
 - Known limits, left as they are:
   - "Last 3 months" of completed tasks is 89 days, so the query stays inside Todoist's 3-month range limit in every month.
   - A rebuild adopts only Assignments in the feed at that moment. A Synced Task whose Assignment is Missing from Canvas during a reset can be duplicated if the Assignment later returns inside the Sync Window.
+
+2026-10-05: Checked against the real feed and Todoist.
+
+- Dry run: `created 0, updated 0, skipped 8, errors 0`. It found 4 tasks I had completed: 509058, 509063, 509066 and 519449.
+- Date-only switch: In-class Assessment 4 (512221) had a time set in Todoist, and its stored Canvas Due Date was faked as timed. The real run gave `created 0, updated 1, skipped 8, errors 0`. Reading the task back afterwards: due `2026-10-15` with no time, and the note was appended after the Canvas link. So Todoist v1 does drop the time when it is sent only `due_date`.
+- `state.json` committed with the 4 entries now `dismissed`.

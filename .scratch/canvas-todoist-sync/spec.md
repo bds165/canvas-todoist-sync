@@ -216,7 +216,7 @@ A small Python script runs every 3 hours on GitHub Actions in a private repo. It
 
 ### Dependencies
 
-`requests`, `icalendar`, a YAML parser, `tzdata` (time zone data for `zoneinfo`), and the standard library. `pytest` for development. No Todoist SDK. The code must run on Python 3.12, even though local development uses a newer version.
+`requests`, `icalendar`, a YAML parser, `tzdata` (time zone data for `zoneinfo`), and the standard library. `pytest` and `mypy` (strict, with the `types-requests` and `types-PyYAML` stubs) for development; neither is installed at run time. No Todoist SDK. The code must run on Python 3.12, even though local development uses a newer version.
 
 ## Testing Decisions
 

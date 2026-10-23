@@ -79,6 +79,16 @@
       "canvas_due": "2026-11-12T20:00:00Z",
       "status": "open",
       "task_id": "6hm3jJ2CpfvmvpfG"
+    },
+    "528595": {
+      "canvas_due": "2026-10-23T05:30:00Z",
+      "status": "open",
+      "task_id": "6hq8XRj4PrR43XVG"
+    },
+    "528598": {
+      "canvas_due": "2026-11-06",
+      "status": "open",
+      "task_id": "6hq8XRjrj8mCxv8G"
     }
   },
   "courses": {

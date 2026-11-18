@@ -2,7 +2,8 @@
   "assignments": {
     "509056": {
       "canvas_due": "2026-10-19T04:00:00Z",
-      "status": "open",
+      "previous_status": "open",
+      "status": "missing_from_canvas",
       "task_id": "6hh2m9VWVmhHhJwp"
     },
     "509058": {
